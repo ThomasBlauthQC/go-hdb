@@ -139,11 +139,6 @@ func (d *Decoder) NumPrm(expected int) error {
 	return nil
 }
 
-// numPrm returns the number of parameters without checking against expected value.
-func (d *Decoder) numPrm() int {
-	return int(d.d.Int16())
-}
-
 func (d *Decoder) String() string               { _, s := d.d.LIString(); return s }
 func (d *Decoder) cesu8String() (string, error) { _, s, err := d.d.CESU8LIString(); return s, err }
 func (d *Decoder) bytes() []byte                { _, b := d.d.LIBytes(); return b }
