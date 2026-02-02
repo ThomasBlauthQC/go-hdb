@@ -74,35 +74,6 @@ func (a *LDAP) Typ() string { return MtLDAP }
 // Order implements the Method interface.
 func (a *LDAP) Order() byte { return MoLDAP }
 
-// generateClientNonce generates a 64-byte random client nonce.
-func (a *LDAP) generateClientNonce() []byte {
-	if a.testClientNonce != nil {
-		return a.testClientNonce
-	}
-	nonce := make([]byte, ldapClientNonceSize)
-	rand.Read(nonce) //nolint:errcheck
-	return nonce
-}
-
-// generateSessionKey generates a 32-byte random AES-256 session key.
-func (a *LDAP) generateSessionKey() []byte {
-	if a.testSessionKey != nil {
-		return a.testSessionKey
-	}
-	key := make([]byte, ldapSessionKeySize)
-	rand.Read(key) //nolint:errcheck
-	return key
-}
-
-// buildCapabilities creates the 8-byte capabilities buffer.
-// First byte is 0x01 (DEFAULT_CAPABILITIES), remaining 7 bytes are 0x00.
-func (a *LDAP) buildCapabilities() []byte {
-	caps := make([]byte, ldapCapabilitiesSize)
-	caps[0] = ldapCapEncrypted // Request encrypted mode; server may respond with simple bind
-	// remaining bytes are already zero
-	return caps
-}
-
 // PrepareInitReq implements the Method interface.
 // Sends: method type, [clientNonce, capabilities] as sub-parameters.
 func (a *LDAP) PrepareInitReq(prms *Prms) error {
@@ -117,6 +88,25 @@ func (a *LDAP) PrepareInitReq(prms *Prms) error {
 	subPrms.addBytes(a.capabilities)
 
 	return nil
+}
+
+// generateClientNonce generates a 64-byte random client nonce.
+func (a *LDAP) generateClientNonce() []byte {
+	if a.testClientNonce != nil {
+		return a.testClientNonce
+	}
+	nonce := make([]byte, ldapClientNonceSize)
+	rand.Read(nonce) //nolint:errcheck
+	return nonce
+}
+
+// buildCapabilities creates the 8-byte capabilities buffer.
+// First byte is 0x01 (DEFAULT_CAPABILITIES), remaining 7 bytes are 0x00.
+func (a *LDAP) buildCapabilities() []byte {
+	caps := make([]byte, ldapCapabilitiesSize)
+	caps[0] = ldapCapEncrypted // Request encrypted mode; server may respond with simple bind
+	// remaining bytes are already zero
+	return caps
 }
 
 // InitRepDecode implements the Method interface.
@@ -238,6 +228,16 @@ func (a *LDAP) PrepareFinalReq(prms *Prms) error {
 	subPrms.addBytes(encryptedPassword)
 
 	return nil
+}
+
+// generateSessionKey generates a 32-byte random AES-256 session key.
+func (a *LDAP) generateSessionKey() []byte {
+	if a.testSessionKey != nil {
+		return a.testSessionKey
+	}
+	key := make([]byte, ldapSessionKeySize)
+	rand.Read(key) //nolint:errcheck
+	return key
 }
 
 // encryptSessionKey encrypts (sessionKey || serverNonce) with RSA-OAEP.
