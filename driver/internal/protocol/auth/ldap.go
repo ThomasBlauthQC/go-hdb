@@ -113,8 +113,7 @@ func (a *LDAP) buildCapabilities() []byte {
 // Receives: [clientNonceProof, serverNonce, serverPublicKey, serverCapabilities].
 func (a *LDAP) InitRepDecode(d *Decoder) error {
 	// Read sub-parameters size
-	subSize := d.subSize()
-	fmt.Printf("LDAP DEBUG: subSize=%d\n", subSize)
+	d.subSize()
 
 	// Expect 4 parameters
 	if err := d.NumPrm(4); err != nil {
@@ -124,14 +123,12 @@ func (a *LDAP) InitRepDecode(d *Decoder) error {
 	// Field 0: Client nonce proof - must match our client nonce
 	// Use subBytes() for sub-parameter encoding (255 = extended length, not null)
 	clientNonceProof := d.bytes()
-	fmt.Printf("LDAP DEBUG: field[0] clientNonceProof len=%d\n", len(clientNonceProof))
 	if !bytes.Equal(clientNonceProof, a.clientNonce) {
 		return fmt.Errorf("LDAP authentication: client nonce mismatch")
 	}
 
 	// Field 1: Server nonce (64 bytes)
 	a.serverNonce = d.bytes()
-	fmt.Printf("LDAP DEBUG: field[1] serverNonce len=%d\n", len(a.serverNonce))
 	if len(a.serverNonce) != ldapServerNonceSize {
 		return fmt.Errorf("LDAP authentication: invalid server nonce size %d, expected %d",
 			len(a.serverNonce), ldapServerNonceSize)
@@ -139,20 +136,14 @@ func (a *LDAP) InitRepDecode(d *Decoder) error {
 
 	// Field 2: Server RSA public key (PEM format)
 	serverPublicKeyPEM := d.bytes()
-	fmt.Printf("LDAP DEBUG: field[2] serverPublicKey len=%d\n", len(serverPublicKeyPEM))
-	if len(serverPublicKeyPEM) > 0 {
-		fmt.Printf("LDAP DEBUG: field[2] first 100 bytes: %s\n", string(serverPublicKeyPEM[:min(100, len(serverPublicKeyPEM))]))
-	}
 
 	// Field 3: Server capabilities
 	serverCaps := d.bytes()
-	fmt.Printf("LDAP DEBUG: field[3] serverCaps len=%d, value=%v\n", len(serverCaps), serverCaps)
 	if len(serverCaps) == 0 {
 		return fmt.Errorf("LDAP authentication: empty server capabilities")
 	}
 
 	capability := serverCaps[0]
-	fmt.Printf("LDAP DEBUG: capability=0x%02x (expected 0x%02x)\n", capability, ldapCapEncrypted)
 	if capability != ldapCapEncrypted {
 		return fmt.Errorf("LDAP authentication: server does not support encrypted LDAP (capability=0x%02x); "+
 			"ensure the HANA server has LDAP encryption configured with an RSA key pair", capability)
