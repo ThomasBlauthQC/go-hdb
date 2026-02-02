@@ -123,14 +123,14 @@ func (a *LDAP) InitRepDecode(d *Decoder) error {
 
 	// Field 0: Client nonce proof - must match our client nonce
 	// Use subBytes() for sub-parameter encoding (255 = extended length, not null)
-	clientNonceProof := d.subBytes()
+	clientNonceProof := d.bytes()
 	fmt.Printf("LDAP DEBUG: field[0] clientNonceProof len=%d\n", len(clientNonceProof))
 	if !bytes.Equal(clientNonceProof, a.clientNonce) {
 		return fmt.Errorf("LDAP authentication: client nonce mismatch")
 	}
 
 	// Field 1: Server nonce (64 bytes)
-	a.serverNonce = d.subBytes()
+	a.serverNonce = d.bytes()
 	fmt.Printf("LDAP DEBUG: field[1] serverNonce len=%d\n", len(a.serverNonce))
 	if len(a.serverNonce) != ldapServerNonceSize {
 		return fmt.Errorf("LDAP authentication: invalid server nonce size %d, expected %d",
@@ -138,14 +138,14 @@ func (a *LDAP) InitRepDecode(d *Decoder) error {
 	}
 
 	// Field 2: Server RSA public key (PEM format)
-	serverPublicKeyPEM := d.subBytes()
+	serverPublicKeyPEM := d.bytes()
 	fmt.Printf("LDAP DEBUG: field[2] serverPublicKey len=%d\n", len(serverPublicKeyPEM))
 	if len(serverPublicKeyPEM) > 0 {
 		fmt.Printf("LDAP DEBUG: field[2] first 100 bytes: %s\n", string(serverPublicKeyPEM[:min(100, len(serverPublicKeyPEM))]))
 	}
 
 	// Field 3: Server capabilities
-	serverCaps := d.subBytes()
+	serverCaps := d.bytes()
 	fmt.Printf("LDAP DEBUG: field[3] serverCaps len=%d, value=%v\n", len(serverCaps), serverCaps)
 	if len(serverCaps) == 0 {
 		return fmt.Errorf("LDAP authentication: empty server capabilities")

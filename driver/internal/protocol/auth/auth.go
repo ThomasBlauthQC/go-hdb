@@ -141,23 +141,8 @@ func (d *Decoder) NumPrm(expected int) error {
 
 func (d *Decoder) String() string               { _, s := d.d.LIString(); return s }
 func (d *Decoder) cesu8String() (string, error) { _, s, err := d.d.CESU8LIString(); return s, err }
-func (d *Decoder) bytes() []byte                { _, b := d.d.LIBytes(); return b }
-
-// subBytes reads bytes using sub-parameter length encoding where:
-// - size <= 245: single byte length
-// - size > 245: byte 255 followed by 2-byte big-endian uint16 length
-// This differs from standard LIBytes which treats 255 as null.
-func (d *Decoder) subBytes() []byte {
-	ind := d.d.Byte()
-	var size int
-	switch {
-	case ind <= maxSubPrmsSize1ByteLen:
-		size = int(ind)
-	case ind == subPrmsSize2ByteIndicator:
-		size = int(d.d.Uint16ByteOrder(binary.BigEndian))
-	default:
-		panic("invalid sub parameter size indicator")
-	}
+func (d *Decoder) bytes() []byte {
+	size := d.subSize()
 	if size == 0 {
 		return nil
 	}
