@@ -11,19 +11,12 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1" //nolint:gosec // HANA LDAP protocol requires SHA-1 for RSA-OAEP
-	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 
 	"github.com/SAP/go-hdb/driver/internal/protocol/auth/ldap"
 )
 
-// LDAP protocol constants.
-const (
-	ldapServerNonceSize = 64
-	ldapCapEncrypted    = 0x01 // Encrypted mode (RSA + AES) - the only supported mode
-	ldapSessionKeySize  = 32   // AES-256 key size
-)
+const ldapSessionKeySize = 32 // AES-256 key size
 
 // LDAP implements LDAP authentication.
 type LDAP struct {
@@ -34,8 +27,7 @@ type LDAP struct {
 	clientChallenge ldap.ClientChallenge
 
 	// Phase 2 data (received from server)
-	serverNonce     []byte
-	serverPublicKey *rsa.PublicKey
+	serverChallenge *ldap.ServerChallenge
 
 	// Phase 3 data (computed)
 	sessionKey []byte
@@ -75,85 +67,23 @@ func (a *LDAP) PrepareInitReq(prms *Prms) error {
 }
 
 // InitRepDecode implements the Method interface.
-// Receives: [clientNonceProof, serverNonce, serverPublicKey, serverCapabilities].
 func (a *LDAP) InitRepDecode(d *Decoder) error {
-	// Read sub-parameters size
 	d.subSize()
 
-	// Expect 4 parameters
 	if err := d.NumPrm(4); err != nil {
 		return fmt.Errorf("LDAP authentication: %w", err)
 	}
 
-	// Field 0: Client nonce proof - must match our client nonce
-	clientNonceProof := d.bytes()
-	if !bytes.Equal(clientNonceProof, a.clientChallenge.ClientNonce[:]) {
+	sc, err := ldap.NewServerChallenge(d.bytes(), d.bytes(), d.bytes(), d.bytes())
+	if err != nil {
+		return fmt.Errorf("LDAP authentication: %w", err)
+	}
+	if sc.ClientNonce != a.clientChallenge.ClientNonce {
 		return fmt.Errorf("LDAP authentication: client nonce mismatch")
 	}
 
-	// Field 1: Server nonce (64 bytes)
-	a.serverNonce = d.bytes()
-	if len(a.serverNonce) != ldapServerNonceSize {
-		return fmt.Errorf("LDAP authentication: invalid server nonce size %d, expected %d",
-			len(a.serverNonce), ldapServerNonceSize)
-	}
-
-	// Field 2: Server RSA public key (PEM format)
-	serverPublicKeyPEM := d.bytes()
-
-	// Field 3: Server capabilities
-	serverCaps := d.bytes()
-	if len(serverCaps) == 0 {
-		return fmt.Errorf("LDAP authentication: empty server capabilities")
-	}
-
-	capability := serverCaps[0]
-	if capability != ldapCapEncrypted {
-		return fmt.Errorf("LDAP authentication: server does not support encrypted LDAP (capability=0x%02x); "+
-			"ensure the HANA server has LDAP encryption configured with an RSA key pair", capability)
-	}
-
-	// Parse the server's RSA public key
-	if len(serverPublicKeyPEM) == 0 {
-		return fmt.Errorf("LDAP authentication: server did not provide RSA public key; " +
-			"ensure the HANA server has LDAP encryption configured")
-	}
-
-	var err error
-	a.serverPublicKey, err = parseRSAPublicKey(serverPublicKeyPEM)
-	if err != nil {
-		return fmt.Errorf("LDAP authentication: failed to parse server public key: %w", err)
-	}
-
+	a.serverChallenge = sc
 	return nil
-}
-
-// parseRSAPublicKey parses an RSA public key from PKCS8/SPKI format.
-// Accepts both PEM-encoded and raw DER-encoded keys.
-func parseRSAPublicKey(data []byte) (*rsa.PublicKey, error) {
-	var derBytes []byte
-
-	// Try PEM decode first
-	block, _ := pem.Decode(data)
-	if block != nil {
-		derBytes = block.Bytes
-	} else {
-		// Assume raw DER if PEM decode fails
-		derBytes = data
-	}
-
-	// Parse PKCS8/SPKI format public key
-	pub, err := x509.ParsePKIXPublicKey(derBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse public key: %w", err)
-	}
-
-	rsaPub, ok := pub.(*rsa.PublicKey)
-	if !ok {
-		return nil, fmt.Errorf("public key is not RSA")
-	}
-
-	return rsaPub, nil
 }
 
 // PrepareFinalReq implements the Method interface.
@@ -195,16 +125,18 @@ func (a *LDAP) generateSessionKey() []byte {
 // encryptSessionKey encrypts (sessionKey || serverNonce) with RSA-OAEP.
 // Uses SHA-1 for OAEP to match HANA server expectations (same as node-hdb).
 func (a *LDAP) encryptSessionKey() ([]byte, error) {
+	serverNonce := a.serverChallenge.ServerNonce[:]
+
 	// Concatenate: sessionKey (32 bytes) + serverNonce (64 bytes) = 96 bytes
-	plaintext := make([]byte, ldapSessionKeySize+ldapServerNonceSize)
+	plaintext := make([]byte, ldapSessionKeySize+len(serverNonce))
 	copy(plaintext[:ldapSessionKeySize], a.sessionKey)
-	copy(plaintext[ldapSessionKeySize:], a.serverNonce)
+	copy(plaintext[ldapSessionKeySize:], serverNonce)
 
 	// Encrypt with RSA-OAEP using SHA-1 (matches node-hdb default)
 	ciphertext, err := rsa.EncryptOAEP(
 		sha1.New(), //nolint:gosec // HANA LDAP protocol requires SHA-1
 		rand.Reader,
-		a.serverPublicKey,
+		a.serverChallenge.ServerPublicKey,
 		plaintext,
 		nil, // no label
 	)
@@ -217,13 +149,15 @@ func (a *LDAP) encryptSessionKey() ([]byte, error) {
 
 // encryptPassword encrypts (password || 0x00 || serverNonce) with AES-256-CBC.
 func (a *LDAP) encryptPassword() ([]byte, error) {
+	serverNonce := a.serverChallenge.ServerNonce[:]
+
 	// Prepare plaintext: password + 0x00 (separator) + serverNonce
 	// The 0x00 separator matches node-hdb's `new Buffer(1)` which creates a zero-filled buffer
 	passwordBytes := []byte(a.password)
-	plaintext := make([]byte, len(passwordBytes)+1+ldapServerNonceSize)
+	plaintext := make([]byte, len(passwordBytes)+1+len(serverNonce))
 	copy(plaintext, passwordBytes)
 	plaintext[len(passwordBytes)] = 0x00 // separator byte
-	copy(plaintext[len(passwordBytes)+1:], a.serverNonce)
+	copy(plaintext[len(passwordBytes)+1:], serverNonce)
 
 	// Apply PKCS7 padding for AES block size (16 bytes)
 	plaintext = pkcs7Pad(plaintext, aes.BlockSize)
@@ -235,7 +169,7 @@ func (a *LDAP) encryptPassword() ([]byte, error) {
 	}
 
 	// IV is the first 16 bytes of serverNonce
-	iv := a.serverNonce[:aes.BlockSize]
+	iv := serverNonce[:aes.BlockSize]
 
 	// Encrypt with CBC mode
 	ciphertext := make([]byte, len(plaintext))
