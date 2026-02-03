@@ -42,8 +42,8 @@ type ClientChallenge struct {
 	Capabilities [8]byte
 }
 
-func NewClientChallenge() ClientChallenge {
-	var c ClientChallenge
+func NewClientChallenge() *ClientChallenge {
+	c := &ClientChallenge{}
 
 	rand.Read(c.ClientNonce[:])
 

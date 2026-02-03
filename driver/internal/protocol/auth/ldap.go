@@ -15,7 +15,7 @@ type LDAP struct {
 	username string
 	password string
 
-	clientChallenge ldap.ClientChallenge
+	clientChallenge *ldap.ClientChallenge
 	serverChallenge *ldap.ServerChallenge
 }
 
