@@ -15,10 +15,7 @@ type LDAP struct {
 	username string
 	password string
 
-	// Phase 1 data
 	clientChallenge ldap.ClientChallenge
-
-	// Phase 2 data (received from server)
 	serverChallenge *ldap.ServerChallenge
 }
 
@@ -33,15 +30,9 @@ func NewLDAP(username, password string) *LDAP {
 func (a *LDAP) String() string {
 	return fmt.Sprintf("method type %s username %s", a.Typ(), a.username)
 }
-
-// Typ implements the Method interface.
 func (a *LDAP) Typ() string { return MtLDAP }
-
-// Order implements the Method interface.
 func (a *LDAP) Order() byte { return MoLDAP }
 
-// PrepareInitReq implements the Method interface.
-// Sends: method type, [clientNonce, capabilities] as sub-parameters.
 func (a *LDAP) PrepareInitReq(prms *Prms) error {
 	a.clientChallenge = ldap.NewClientChallenge()
 
@@ -55,10 +46,8 @@ func (a *LDAP) PrepareInitReq(prms *Prms) error {
 	return nil
 }
 
-// InitRepDecode implements the Method interface.
 func (a *LDAP) InitRepDecode(d *Decoder) error {
 	d.subSize()
-
 	if err := d.NumPrm(4); err != nil {
 		return fmt.Errorf("LDAP authentication: %w", err)
 	}
@@ -75,7 +64,6 @@ func (a *LDAP) InitRepDecode(d *Decoder) error {
 	return nil
 }
 
-// PrepareFinalReq implements the Method interface.
 func (a *LDAP) PrepareFinalReq(prms *Prms) error {
 	clientProof, err := ldap.NewClientProof(a.password, a.serverChallenge)
 	if err != nil {
@@ -92,11 +80,11 @@ func (a *LDAP) PrepareFinalReq(prms *Prms) error {
 	return nil
 }
 
-// FinalRepDecode implements the Method interface.
 func (a *LDAP) FinalRepDecode(d *Decoder) error {
 	if err := d.NumPrm(2); err != nil {
 		return fmt.Errorf("LDAP authentication: %w", err)
 	}
+
 	fr, err := ldap.NewFinalResponse(d.String(), d.bytes())
 	if err != nil {
 		return fmt.Errorf("LDAP authentication: %w", err)
