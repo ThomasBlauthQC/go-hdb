@@ -14,15 +14,15 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+
+	"github.com/SAP/go-hdb/driver/internal/protocol/auth/ldap"
 )
 
 // LDAP protocol constants.
 const (
-	ldapClientNonceSize  = 64
-	ldapServerNonceSize  = 64
-	ldapCapabilitiesSize = 8
-	ldapCapEncrypted     = 0x01 // Encrypted mode (RSA + AES) - the only supported mode
-	ldapSessionKeySize   = 32   // AES-256 key size
+	ldapServerNonceSize = 64
+	ldapCapEncrypted    = 0x01 // Encrypted mode (RSA + AES) - the only supported mode
+	ldapSessionKeySize  = 32   // AES-256 key size
 )
 
 // LDAP implements LDAP authentication.
@@ -31,8 +31,7 @@ type LDAP struct {
 	password string
 
 	// Phase 1 data
-	clientNonce  []byte
-	capabilities []byte
+	clientChallenge ldap.ClientChallenge
 
 	// Phase 2 data (received from server)
 	serverNonce     []byte
@@ -40,10 +39,6 @@ type LDAP struct {
 
 	// Phase 3 data (computed)
 	sessionKey []byte
-
-	// For testing - allows injecting deterministic values.
-	testClientNonce []byte
-	testSessionKey  []byte
 }
 
 // NewLDAP creates a new LDAP authentication instance.
@@ -51,16 +46,6 @@ func NewLDAP(username, password string) *LDAP {
 	return &LDAP{
 		username: username,
 		password: password,
-	}
-}
-
-// newLDAPWithTestData creates an LDAP instance with test data for deterministic testing.
-func newLDAPWithTestData(username, password string, clientNonce, sessionKey []byte) *LDAP {
-	return &LDAP{
-		username:        username,
-		password:        password,
-		testClientNonce: clientNonce,
-		testSessionKey:  sessionKey,
 	}
 }
 
@@ -77,36 +62,16 @@ func (a *LDAP) Order() byte { return MoLDAP }
 // PrepareInitReq implements the Method interface.
 // Sends: method type, [clientNonce, capabilities] as sub-parameters.
 func (a *LDAP) PrepareInitReq(prms *Prms) error {
-	a.clientNonce = a.generateClientNonce()
-	a.capabilities = a.buildCapabilities()
+	a.clientChallenge = ldap.NewClientChallenge()
 
 	prms.addString(a.Typ())
 
 	// Add sub-parameters: clientNonce and capabilities
 	subPrms := prms.addPrms()
-	subPrms.addBytes(a.clientNonce)
-	subPrms.addBytes(a.capabilities)
+	subPrms.addBytes(a.clientChallenge.ClientNonce[:])
+	subPrms.addBytes(a.clientChallenge.Capabilities[:])
 
 	return nil
-}
-
-// generateClientNonce generates a 64-byte random client nonce.
-func (a *LDAP) generateClientNonce() []byte {
-	if a.testClientNonce != nil {
-		return a.testClientNonce
-	}
-	nonce := make([]byte, ldapClientNonceSize)
-	rand.Read(nonce) //nolint:errcheck
-	return nonce
-}
-
-// buildCapabilities creates the 8-byte capabilities buffer.
-// First byte is 0x01 (DEFAULT_CAPABILITIES), remaining 7 bytes are 0x00.
-func (a *LDAP) buildCapabilities() []byte {
-	caps := make([]byte, ldapCapabilitiesSize)
-	caps[0] = ldapCapEncrypted // Request encrypted mode; server may respond with simple bind
-	// remaining bytes are already zero
-	return caps
 }
 
 // InitRepDecode implements the Method interface.
@@ -121,9 +86,8 @@ func (a *LDAP) InitRepDecode(d *Decoder) error {
 	}
 
 	// Field 0: Client nonce proof - must match our client nonce
-	// Use subBytes() for sub-parameter encoding (255 = extended length, not null)
 	clientNonceProof := d.bytes()
-	if !bytes.Equal(clientNonceProof, a.clientNonce) {
+	if !bytes.Equal(clientNonceProof, a.clientChallenge.ClientNonce[:]) {
 		return fmt.Errorf("LDAP authentication: client nonce mismatch")
 	}
 
@@ -223,9 +187,6 @@ func (a *LDAP) PrepareFinalReq(prms *Prms) error {
 
 // generateSessionKey generates a 32-byte random AES-256 session key.
 func (a *LDAP) generateSessionKey() []byte {
-	if a.testSessionKey != nil {
-		return a.testSessionKey
-	}
 	key := make([]byte, ldapSessionKeySize)
 	rand.Read(key) //nolint:errcheck
 	return key
