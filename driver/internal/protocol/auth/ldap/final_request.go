@@ -33,6 +33,7 @@ type FinalRequest struct {
 
 // LDAP client proof data.
 // Taken from "SAP HANA SQL Command Network Protocol Reference" version 1.1 chapter 3.9.2.2
+// The spec does not document the client proof in detail.
 //
 // Wire format:
 //	Field                 Data Type        Description
@@ -48,24 +49,17 @@ type ClientProof struct {
 
 const sessionKeySize = 32 // AES-256 key size
 
-// NewClientProof creates a ClientProof by encrypting the password with a new session key.
-// The session key is encrypted with RSA-OAEP using the server's public key.
-// The password is encrypted with AES-256-CBC using the session key.
-func NewClientProof(password string, serverChallenge *ServerChallenge) (*ClientProof, error) {
+func NewClientProof(password string, sc *ServerChallenge) (*ClientProof, error) {
 	// Generate random session key
 	sessionKey := make([]byte, sessionKeySize)
 	rand.Read(sessionKey) //nolint:errcheck
 
-	serverNonce := serverChallenge.ServerNonce[:]
-
-	// Encrypt session key: RSAEncrypt(publicKey, SESSIONKEY + SERVERNONCE)
-	encryptedSessionKey, err := encryptSessionKey(sessionKey, serverNonce, serverChallenge.ServerPublicKey)
+	encryptedSessionKey, err := encryptSessionKey(sessionKey, sc)
 	if err != nil {
 		return nil, err
 	}
 
-	// Encrypt password: AES256Encrypt(SESSIONKEY, PASSWORD + SERVERNONCE)
-	encryptedPassword, err := encryptPassword(password, sessionKey, serverNonce)
+	encryptedPassword, err := encryptPassword(password, sessionKey, sc)
 	if err != nil {
 		return nil, err
 	}
@@ -76,17 +70,17 @@ func NewClientProof(password string, serverChallenge *ServerChallenge) (*ClientP
 	}, nil
 }
 
-// encryptSessionKey encrypts (sessionKey || serverNonce) with RSA-OAEP.
-func encryptSessionKey(sessionKey, serverNonce []byte, publicKey *rsa.PublicKey) ([]byte, error) {
-	// Concatenate: sessionKey (32 bytes) + serverNonce (64 bytes) = 96 bytes
-	plaintext := make([]byte, len(sessionKey)+len(serverNonce))
+// Implementation details are based on
+// https://github.com/SAP/node-hdb/blob/master/lib/protocol/auth/LDAP.js
+func encryptSessionKey(sessionKey []byte, sc *ServerChallenge) ([]byte, error) {
+	plaintext := make([]byte, len(sessionKey)+len(sc.ServerNonce))
 	copy(plaintext[:len(sessionKey)], sessionKey)
-	copy(plaintext[len(sessionKey):], serverNonce)
+	copy(plaintext[len(sessionKey):], sc.ServerNonce[:])
 
 	ciphertext, err := rsa.EncryptOAEP(
 		sha1.New(), //nolint:gosec
 		rand.Reader,
-		publicKey,
+		sc.ServerPublicKey,
 		plaintext,
 		nil, // no label
 	)
@@ -97,29 +91,25 @@ func encryptSessionKey(sessionKey, serverNonce []byte, publicKey *rsa.PublicKey)
 	return ciphertext, nil
 }
 
-// encryptPassword encrypts (password || 0x00 || serverNonce) with AES-256-CBC.
-func encryptPassword(password string, sessionKey, serverNonce []byte) ([]byte, error) {
-	// Prepare plaintext: password + 0x00 (separator) + serverNonce
-	// The 0x00 separator matches node-hdb's `new Buffer(1)` which creates a zero-filled buffer
+// Implementation details are based on
+// https://github.com/SAP/node-hdb/blob/master/lib/protocol/auth/LDAP.js
+func encryptPassword(password string, sessionKey []byte, sc *ServerChallenge) ([]byte, error) {
 	passwordBytes := []byte(password)
-	plaintext := make([]byte, len(passwordBytes)+1+len(serverNonce))
-	copy(plaintext, passwordBytes)
-	plaintext[len(passwordBytes)] = 0x00 // separator byte
-	copy(plaintext[len(passwordBytes)+1:], serverNonce)
 
-	// Apply PKCS7 padding for AES block size (16 bytes)
+	plaintext := make([]byte, len(passwordBytes)+1+len(sc.ServerNonce))
+	copy(plaintext, passwordBytes)
+	plaintext[len(passwordBytes)] = 0x00 // Magic separator byte
+	copy(plaintext[len(passwordBytes)+1:], sc.ServerNonce[:])
+
 	plaintext = pkcs7Pad(plaintext, aes.BlockSize)
 
-	// Create AES cipher with 32-byte session key
 	block, err := aes.NewCipher(sessionKey)
 	if err != nil {
 		return nil, err
 	}
 
-	// IV is the first 16 bytes of serverNonce
-	iv := serverNonce[:aes.BlockSize]
+	iv := sc.ServerNonce[:aes.BlockSize]
 
-	// Encrypt with CBC mode
 	ciphertext := make([]byte, len(plaintext))
 	mode := cipher.NewCBCEncrypter(block, iv)
 	mode.CryptBlocks(ciphertext, plaintext)
