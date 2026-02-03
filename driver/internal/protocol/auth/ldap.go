@@ -95,13 +95,14 @@ func (a *LDAP) PrepareFinalReq(prms *Prms) error {
 // FinalRepDecode implements the Method interface.
 func (a *LDAP) FinalRepDecode(d *Decoder) error {
 	if err := d.NumPrm(2); err != nil {
+		return fmt.Errorf("LDAP authentication: %w", err)
+	}
+	fr, err := ldap.NewFinalResponse(d.String(), d.bytes())
+	if err != nil {
+		return fmt.Errorf("LDAP authentication: %w", err)
+	}
+	if err := checkAuthMethodType(fr.MethodName, a.Typ()); err != nil {
 		return err
 	}
-	mt := d.String()
-	if err := checkAuthMethodType(mt, a.Typ()); err != nil {
-		return err
-	}
-	// Second parameter may contain additional data - read and discard
-	d.bytes()
 	return nil
 }
