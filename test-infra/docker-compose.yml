@@ -1,62 +1,33 @@
-version: '3'
 services:
   openldap:
-    image: docker.io/osixia/openldap:latest
-    container_name: openldap
-    hostname: openldap
+    image: osixia/openldap:latest
     ports:
       - "389:389"
-      - "636:636"
     environment:
-      LDAP_ORGANISATION: "Test Org"
+      LDAP_ORGANISATION: "Test"
       LDAP_DOMAIN: "example.com"
       LDAP_ADMIN_PASSWORD: "admin123"
-      LDAP_CONFIG_PASSWORD: "config123"
       LDAP_TLS: "false"
-      LDAP_TLS_VERIFY_CLIENT: "never"
-    volumes:
-      - ldap-data:/var/lib/ldap
-      - ldap-config:/etc/ldap/slapd.d
     healthcheck:
-      test: "ldapsearch -x -H ldap://localhost:389 -b dc=example,dc=com"
-      interval: 10s
-      timeout: 5s
+      test: ldapsearch -x -H ldap://localhost -b dc=example,dc=com
+      interval: 5s
+      timeout: 3s
       retries: 5
 
-  hanaexpress:
-    image: docker.io/saplabs/hanaexpress:latest
-    container_name: hanaexpress
-    hostname: hanaexpress
+  hana:
+    image: saplabs/hanaexpress:latest
     ports:
-      - "39013:39013"  # System DB SQL
-      - "39015:39015"  # System DB SQL (MDC)
-      - "39017:39017"  # Tenant DB SQL
-      - "39041:39041"  # Cockpit
-      - "59013:59013"  # HTTP
+      - "39017:39017"
     ulimits:
-      nofile:
-        soft: 1048576
-        hard: 1048576
+      nofile: 1048576
     sysctls:
       - kernel.shmmax=1073741824
       - kernel.shmmni=4096
       - kernel.shmall=8388608
-    volumes:
-      - hana-data:/hana/mounts
-      - ./hana-init:/hana/init:ro
-    depends_on:
-      openldap:
-        condition: service_healthy
+    command: --master-password HanaExpress1 --agree-to-sap-license
     healthcheck:
-      test: "/usr/sap/HXE/HDB90/exe/hdbsql -i 90 -u SYSTEM -p HanaExpress1 -d SYSTEMDB 'SELECT 1 FROM DUMMY'"
+      test: /usr/sap/HXE/HDB90/exe/hdbsql -i 90 -u SYSTEM -p HanaExpress1 -d SYSTEMDB "SELECT 1 FROM DUMMY"
       interval: 30s
       timeout: 10s
       retries: 20
       start_period: 300s
-    command: --master-password HanaExpress1 --agree-to-sap-license
-
-
-volumes:
-  ldap-data:
-  ldap-config:
-  hana-data:

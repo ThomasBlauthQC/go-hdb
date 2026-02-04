@@ -108,7 +108,6 @@ func (r *AuthInitReply) decode(dec *encoding.Decoder) error {
 		return err
 	}
 	mt := d.String()
-	fmt.Printf("AUTH DEBUG: server selected method: %s\n", mt)
 
 	if err := r.authHnd.setMethod(mt); err != nil {
 		return err
