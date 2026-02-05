@@ -47,7 +47,7 @@ func TestLDAPAuthenticationWithTestcontainers(t *testing.T) {
 
 	// Setup LDAP
 	t.Log("Starting OpenLDAP container...")
-	ldap, err := setupLDAP(ctx, testNetwork.Name)
+	ldap, err := setupLDAP(ctx, testNetwork)
 	if err != nil {
 		t.Fatalf("failed to setup LDAP: %v", err)
 	}
@@ -95,6 +95,7 @@ func TestLDAPAuthenticationWithTestcontainers(t *testing.T) {
 type ldapFixture struct {
 	Container    testcontainers.Container
 	URL          string // ldap://host:port for external access
+	InternalHost string // hostname:port on docker network (for container-to-container access)
 	AdminDN      string
 	AdminPwd     string
 	TestUserDN   string
@@ -109,7 +110,7 @@ func (f *ldapFixture) Terminate(ctx context.Context) {
 	}
 }
 
-func setupLDAP(ctx context.Context, networkName string) (*ldapFixture, error) {
+func setupLDAP(ctx context.Context, nw *testcontainers.DockerNetwork) (*ldapFixture, error) {
 	const (
 		image        = "osixia/openldap:latest"
 		domain       = "example.com"
@@ -117,13 +118,15 @@ func setupLDAP(ctx context.Context, networkName string) (*ldapFixture, error) {
 		adminPwd     = "admin123"
 		testUser     = "ldapuser1"
 		testPassword = "LdapPass123"
+		ldapAlias    = "ldap" // hostname on docker network
 	)
 
-	// Start container
+	// Start container with network alias for container-to-container access
 	req := testcontainers.ContainerRequest{
-		Image:        image,
-		ExposedPorts: []string{"389/tcp"},
-		Networks:     []string{networkName},
+		Image:          image,
+		ExposedPorts:   []string{"389/tcp"},
+		Networks:       []string{nw.Name},
+		NetworkAliases: map[string][]string{nw.Name: {ldapAlias}},
 		Env: map[string]string{
 			"LDAP_ORGANISATION":   org,
 			"LDAP_DOMAIN":         domain,
@@ -158,6 +161,7 @@ func setupLDAP(ctx context.Context, networkName string) (*ldapFixture, error) {
 	f := &ldapFixture{
 		Container:    c,
 		URL:          fmt.Sprintf("ldap://%s:%s", host, port.Port()),
+		InternalHost: ldapAlias + ":389", // use network alias for container-to-container
 		AdminDN:      "cn=admin,dc=example,dc=com",
 		AdminPwd:     adminPwd,
 		TestUserDN:   fmt.Sprintf("cn=%s,ou=users,dc=example,dc=com", testUser),
@@ -287,10 +291,8 @@ func configureHANAforLDAP(systemDSN string, ldap *ldapFixture) error {
 	db.Exec(`CREATE PSE LDAP_PSE`)
 	db.Exec(`SET PSE LDAP_PSE PURPOSE LDAP`)
 
-	// Get LDAP port from URL and use host.docker.internal for container-to-container access
-	// ldap.URL is like "ldap://localhost:32792", extract port
-	ldapPort := ldap.URL[strings.LastIndex(ldap.URL, ":")+1:]
-	ldapHost := fmt.Sprintf("%s:%s", testcontainers.HostInternal, ldapPort)
+	// Use container-to-container networking via the docker network alias
+	ldapHost := ldap.InternalHost
 
 	// Create LDAP provider
 	createProvider := fmt.Sprintf(`CREATE LDAP PROVIDER LDAP_TEST_PROVIDER
@@ -324,6 +326,11 @@ func configureHANAforLDAP(systemDSN string, ldap *ldapFixture) error {
 
 	if _, err = db.Exec(`ALTER USER ` + ldap.TestUser + ` AUTHORIZATION LDAP`); err != nil {
 		return fmt.Errorf("set LDAP authorization: %w", err)
+	}
+
+	// Validate LDAP provider connectivity
+	if _, err = db.Exec(`VALIDATE LDAP PROVIDER LDAP_TEST_PROVIDER`); err != nil {
+		return fmt.Errorf("validate LDAP provider (HANA cannot reach LDAP at %s): %w", ldapHost, err)
 	}
 
 	return nil
