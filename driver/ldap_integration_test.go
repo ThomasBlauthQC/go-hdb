@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/client"
 	"github.com/docker/go-units"
 	"github.com/go-ldap/ldap/v3"
 	"github.com/testcontainers/testcontainers-go"
@@ -19,9 +21,79 @@ import (
 )
 
 const (
-	hanaImage     = "saplabs/hanaexpress:latest"
-	hanaMasterPwd = "HanaExpress1"
+	hanaImage         = "saplabs/hanaexpress:latest"
+	hanaMasterPwd     = "HanaExpress1"
+	hanaContainerName = "hana-test-reuse"
 )
+
+// getOrCreateHANAWithNetwork checks if a HANA container already exists.
+// If so, it reuses the container's network. Otherwise, it creates a new network and starts HANA.
+func getOrCreateHANAWithNetwork(ctx context.Context, t *testing.T) (*testcontainers.DockerNetwork, testcontainers.Container, error) {
+	t.Helper()
+
+	// Check if HANA container already exists
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return nil, nil, fmt.Errorf("create docker client: %w", err)
+	}
+	defer cli.Close()
+
+	// Look for existing container by name
+	containers, err := cli.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("name", "^/"+hanaContainerName+"$")),
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("list containers: %w", err)
+	}
+
+	if len(containers) > 0 {
+		// Container exists - reuse its network
+		existingContainer := containers[0]
+		t.Logf("Found existing HANA container %s", existingContainer.ID[:12])
+
+		// Get the network the container is on
+		var networkName string
+		for name := range existingContainer.NetworkSettings.Networks {
+			networkName = name
+			break
+		}
+
+		if networkName == "" {
+			return nil, nil, fmt.Errorf("existing container has no network")
+		}
+
+		t.Logf("Reusing network: %s", networkName)
+
+		// Get/create DockerNetwork wrapper for the existing network
+		nw := &testcontainers.DockerNetwork{Name: networkName}
+
+		// Start HANA (will reuse existing container)
+		t.Log("Reusing existing HANA Express container...")
+		hanaContainer, err := startHANAExpress(ctx, nw)
+		if err != nil {
+			return nil, nil, fmt.Errorf("start HANA: %w", err)
+		}
+
+		return nw, hanaContainer, nil
+	}
+
+	// No existing container - create new network and start HANA
+	t.Log("Starting HANA Express container (this may take 5-10 minutes)...")
+
+	nw, err := network.New(ctx, network.WithCheckDuplicate())
+	if err != nil {
+		return nil, nil, fmt.Errorf("create network: %w", err)
+	}
+
+	hanaContainer, err := startHANAExpress(ctx, nw)
+	if err != nil {
+		nw.Remove(ctx) //nolint:errcheck
+		return nil, nil, fmt.Errorf("start HANA: %w", err)
+	}
+
+	return nw, hanaContainer, nil
+}
 
 // TestLDAPAuthenticationWithTestcontainers runs the LDAP authentication test
 // using testcontainers to manage the infrastructure.
@@ -34,35 +106,20 @@ func TestLDAPAuthenticationWithTestcontainers(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create a shared network for containers with fixed name for reuse
-	const networkName = "hana-ldap-test"
-	testNetwork, err := network.New(ctx,
-		network.WithName(networkName),
-		network.WithCheckDuplicate(),
-	)
+	// Try to reuse existing HANA container's network, or create new one
+	testNetwork, hanaContainer, err := getOrCreateHANAWithNetwork(ctx, t)
 	if err != nil {
-		t.Fatalf("failed to create network: %v", err)
+		t.Fatalf("failed to setup HANA: %v", err)
 	}
-	// Don't remove network when reusing containers
-	// defer testNetwork.Remove(ctx)
 
-	// Setup LDAP
+	// Setup LDAP on the same network
 	t.Log("Starting OpenLDAP container...")
 	ldap, err := setupLDAP(ctx, testNetwork)
 	if err != nil {
 		t.Fatalf("failed to setup LDAP: %v", err)
 	}
 	defer ldap.Terminate(ctx)
-	t.Logf("OpenLDAP available at %s", ldap.URL)
-
-	// Start HANA Express container (reused - don't terminate)
-	t.Log("Starting HANA Express container (this may take 5-10 minutes)...")
-	hanaContainer, err := startHANAExpress(ctx, testNetwork)
-	if err != nil {
-		t.Fatalf("failed to start HANA Express: %v", err)
-	}
-	// Don't terminate - container is reused between test runs
-	_ = hanaContainer
+	t.Logf("OpenLDAP available at %s (internal: %s)", ldap.URL, ldap.InternalHost)
 
 	hanaHost, err := hanaContainer.Host(ctx)
 	if err != nil {
@@ -247,7 +304,7 @@ func (f *ldapFixture) setupEntries(testUser, testPassword string) error {
 
 func startHANAExpress(ctx context.Context, nw *testcontainers.DockerNetwork) (testcontainers.Container, error) {
 	return testcontainers.Run(ctx, hanaImage,
-		testcontainers.WithReuseByName("hana-test-reuse"),
+		testcontainers.WithReuseByName(hanaContainerName),
 		testcontainers.WithExposedPorts("39017/tcp", "39013/tcp"),
 		network.WithNetwork([]string{"hana"}, nw),
 		testcontainers.WithCmd("--master-password", hanaMasterPwd, "--agree-to-sap-license"),
