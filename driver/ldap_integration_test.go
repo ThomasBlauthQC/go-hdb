@@ -319,7 +319,11 @@ func startHANAExpress(ctx context.Context, nw *testcontainers.DockerNetwork) (te
 			}
 			hc.SecurityOpt = []string{"seccomp=unconfined"}
 		}),
-		testcontainers.WithWaitStrategy(wait.ForLog("Startup finished").WithStartupTimeout(15*time.Minute)),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("Startup finished").
+				WithStartupTimeout(15*time.Minute).
+				WithPollInterval(5*time.Second),
+		),
 	)
 }
 
