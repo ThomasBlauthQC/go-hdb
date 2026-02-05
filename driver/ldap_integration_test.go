@@ -95,7 +95,6 @@ func TestLDAPAuthenticationWithTestcontainers(t *testing.T) {
 type ldapFixture struct {
 	Container    testcontainers.Container
 	URL          string // ldap://host:port for external access
-	NetworkAlias string // hostname for containers on same network
 	AdminDN      string
 	AdminPwd     string
 	TestUserDN   string
@@ -118,7 +117,6 @@ func setupLDAP(ctx context.Context, networkName string) (*ldapFixture, error) {
 		adminPwd     = "admin123"
 		testUser     = "ldapuser1"
 		testPassword = "LdapPass123"
-		networkAlias = "openldap"
 	)
 
 	// Start container
@@ -126,9 +124,6 @@ func setupLDAP(ctx context.Context, networkName string) (*ldapFixture, error) {
 		Image:        image,
 		ExposedPorts: []string{"389/tcp"},
 		Networks:     []string{networkName},
-		NetworkAliases: map[string][]string{
-			networkName: {networkAlias},
-		},
 		Env: map[string]string{
 			"LDAP_ORGANISATION":   org,
 			"LDAP_DOMAIN":         domain,
@@ -163,7 +158,6 @@ func setupLDAP(ctx context.Context, networkName string) (*ldapFixture, error) {
 	f := &ldapFixture{
 		Container:    c,
 		URL:          fmt.Sprintf("ldap://%s:%s", host, port.Port()),
-		NetworkAlias: networkAlias,
 		AdminDN:      "cn=admin,dc=example,dc=com",
 		AdminPwd:     adminPwd,
 		TestUserDN:   fmt.Sprintf("cn=%s,ou=users,dc=example,dc=com", testUser),
@@ -293,15 +287,20 @@ func configureHANAforLDAP(systemDSN string, ldap *ldapFixture) error {
 	db.Exec(`CREATE PSE LDAP_PSE`)
 	db.Exec(`SET PSE LDAP_PSE PURPOSE LDAP`)
 
-	// Create LDAP provider - use NetworkAlias since HANA connects via container network
+	// Get LDAP port from URL and use host.docker.internal for container-to-container access
+	// ldap.URL is like "ldap://localhost:32792", extract port
+	ldapPort := ldap.URL[strings.LastIndex(ldap.URL, ":")+1:]
+	ldapHost := fmt.Sprintf("%s:%s", testcontainers.HostInternal, ldapPort)
+
+	// Create LDAP provider
 	createProvider := fmt.Sprintf(`CREATE LDAP PROVIDER LDAP_TEST_PROVIDER
 		CREDENTIAL TYPE 'PASSWORD' USING 'user=%s;password=%s'
-		USER LOOKUP URL 'ldap://%s:389/ou=users,dc=example,dc=com??sub?(cn=*)'
+		USER LOOKUP URL 'ldap://%s/ou=users,dc=example,dc=com??sub?(cn=*)'
 		ATTRIBUTE DN 'distinguishedName'
 		ATTRIBUTE MEMBER_OF 'memberOf'
 		SSL OFF
 		DEFAULT ON
-		ENABLE PROVIDER`, ldap.AdminDN, ldap.AdminPwd, ldap.NetworkAlias)
+		ENABLE PROVIDER`, ldap.AdminDN, ldap.AdminPwd, ldapHost)
 
 	if _, err = db.Exec(createProvider); err != nil {
 		return fmt.Errorf("create LDAP provider: %w", err)
