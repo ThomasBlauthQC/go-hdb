@@ -34,10 +34,11 @@ func TestLDAPAuthenticationWithTestcontainers(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create a shared network for containers (reuse for faster iteration)
+	// Create a shared network for containers with fixed name for reuse
+	const networkName = "hana-ldap-test"
 	testNetwork, err := network.New(ctx,
+		network.WithName(networkName),
 		network.WithCheckDuplicate(),
-		network.WithLabels(map[string]string{"testcontainers.reuse": "true"}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create network: %v", err)
