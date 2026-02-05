@@ -1,4 +1,4 @@
-//go:build integration
+//go:build unit
 
 package driver
 
@@ -121,11 +121,10 @@ func startOpenLDAP(ctx context.Context, networkName string) (testcontainers.Cont
 			networkName: {"openldap"},
 		},
 		Env: map[string]string{
-			"LDAP_ORGANISATION":    ldapOrg,
-			"LDAP_DOMAIN":          ldapDomain,
-			"LDAP_ADMIN_PASSWORD":  ldapAdminPwd,
-			"LDAP_TLS":             "false",
-			"LDAP_REMOVE_CONFIG_AFTER_SETUP": "false",
+			"LDAP_ORGANISATION":   ldapOrg,
+			"LDAP_DOMAIN":         ldapDomain,
+			"LDAP_ADMIN_PASSWORD": ldapAdminPwd,
+			"LDAP_TLS":            "false",
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForListeningPort("389/tcp"),
@@ -162,13 +161,11 @@ func startHANAExpress(ctx context.Context, networkName string) (testcontainers.C
 				"kernel.shmmni":  "4096",
 				"kernel.shmall":  "8388608",
 			}
+			// HANA requires additional syscalls (move_pages, mbind) - disable seccomp
+			hc.SecurityOpt = []string{"seccomp=unconfined"}
 		},
 		// Wait for HANA to be ready - this takes a while
-		WaitingFor: wait.ForAll(
-			wait.ForListeningPort("39017/tcp"),
-			// HANA takes time to initialize after port is open
-			wait.ForLog("Startup finished"),
-		).WithDeadline(15 * time.Minute),
+		WaitingFor: wait.ForLog("Startup finished").WithStartupTimeout(15 * time.Minute),
 	}
 
 	return testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
