@@ -34,12 +34,16 @@ func TestLDAPAuthenticationWithTestcontainers(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create a shared network for containers
-	testNetwork, err := network.New(ctx, network.WithCheckDuplicate())
+	// Create a shared network for containers (reuse for faster iteration)
+	testNetwork, err := network.New(ctx,
+		network.WithCheckDuplicate(),
+		network.WithLabels(map[string]string{"testcontainers.reuse": "true"}),
+	)
 	if err != nil {
 		t.Fatalf("failed to create network: %v", err)
 	}
-	defer testNetwork.Remove(ctx) //nolint:errcheck
+	// Don't remove network when reusing containers
+	// defer testNetwork.Remove(ctx)
 
 	// Setup LDAP
 	t.Log("Starting OpenLDAP container...")
@@ -50,13 +54,14 @@ func TestLDAPAuthenticationWithTestcontainers(t *testing.T) {
 	defer ldap.Terminate(ctx)
 	t.Logf("OpenLDAP available at %s", ldap.URL)
 
-	// Start HANA Express container
+	// Start HANA Express container (reused - don't terminate)
 	t.Log("Starting HANA Express container (this may take 5-10 minutes)...")
-	hanaContainer, err := startHANAExpress(ctx, testNetwork.Name)
+	hanaContainer, err := startHANAExpress(ctx, testNetwork)
 	if err != nil {
 		t.Fatalf("failed to start HANA Express: %v", err)
 	}
-	defer hanaContainer.Terminate(ctx) //nolint:errcheck
+	// Don't terminate - container is reused between test runs
+	_ = hanaContainer
 
 	hanaHost, err := hanaContainer.Host(ctx)
 	if err != nil {
@@ -241,40 +246,25 @@ func (f *ldapFixture) setupEntries(testUser, testPassword string) error {
 	return nil
 }
 
-func startHANAExpress(ctx context.Context, networkName string) (testcontainers.Container, error) {
-	req := testcontainers.ContainerRequest{
-		Image:        hanaImage,
-		ExposedPorts: []string{"39017/tcp", "39013/tcp"},
-		Networks:     []string{networkName},
-		NetworkAliases: map[string][]string{
-			networkName: {"hana"},
-		},
-		Cmd: []string{
-			"--master-password", hanaMasterPwd,
-			"--agree-to-sap-license",
-		},
-		// HANA requires specific resource settings
-		HostConfigModifier: func(hc *container.HostConfig) {
+func startHANAExpress(ctx context.Context, nw *testcontainers.DockerNetwork) (testcontainers.Container, error) {
+	return testcontainers.Run(ctx, hanaImage,
+		testcontainers.WithReuseByName("hana-test-reuse"),
+		testcontainers.WithExposedPorts("39017/tcp", "39013/tcp"),
+		network.WithNetwork([]string{"hana"}, nw),
+		testcontainers.WithCmd("--master-password", hanaMasterPwd, "--agree-to-sap-license"),
+		testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
 			hc.Ulimits = []*units.Ulimit{
 				{Name: "nofile", Hard: 1048576, Soft: 1048576},
 			}
-			// HANA requires specific sysctls - these may need host configuration
 			hc.Sysctls = map[string]string{
 				"kernel.shmmax":  "1073741824",
 				"kernel.shmmni":  "4096",
 				"kernel.shmall":  "8388608",
 			}
-			// HANA requires additional syscalls (move_pages, mbind) - disable seccomp
 			hc.SecurityOpt = []string{"seccomp=unconfined"}
-		},
-		// Wait for HANA to be ready - this takes a while
-		WaitingFor: wait.ForLog("Startup finished").WithStartupTimeout(15 * time.Minute),
-	}
-
-	return testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
+		}),
+		testcontainers.WithWaitStrategy(wait.ForLog("Startup finished").WithStartupTimeout(15*time.Minute)),
+	)
 }
 
 func configureHANAforLDAP(systemDSN string, ldap *ldapFixture) error {
