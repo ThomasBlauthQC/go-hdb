@@ -1,9 +1,22 @@
 Release Notes
 =============
 
+## v1.15.0
+
+### Changes
+
+- Added support of Go 1.26.
+- Dropped support of Go language versions < Go 1.25.
+
 ## v1.14.0
 
 ### Minor revisions
+
+#### v1.14.21 - v1.14.22
+- fixed switchUser bug (https://github.com/SAP/go-hdb/pull/158)
+
+#### v1.14.20
+- updated dependencies
 
 #### v1.14.19
 - changed default dialer preference to "tcp4" until HANA cloud would fully support IPv6 (see https://github.com/SAP/go-hdb/issues/157)

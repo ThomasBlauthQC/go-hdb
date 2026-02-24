@@ -1,15 +1,15 @@
 module github.com/SAP/go-hdb
 
-go 1.24.0
+go 1.25.0
 
-toolchain go1.25.6
+toolchain go1.26.0
 
 require (
 	github.com/docker/docker v28.5.1+incompatible
 	github.com/docker/go-units v0.5.0
 	github.com/go-ldap/ldap/v3 v3.4.12
 	github.com/testcontainers/testcontainers-go v0.40.0
-	golang.org/x/text v0.33.0
+	golang.org/x/text v0.34.0
 )
 
 require (
