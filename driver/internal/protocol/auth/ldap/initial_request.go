@@ -7,7 +7,7 @@ package ldap
 import "crypto/rand"
 
 // Initial LDAP authentication request.
-// Taken from "SAP HANA SQL Command Network Protocol Reference" version 1.1 chapter 3.9.2.2
+// Taken from "SAP HANA SQL Command Network Protocol Reference" version 1.2 chapter 3.9.2.2
 //
 // Wire format:
 //	Field            Data Type        Description
@@ -25,7 +25,7 @@ type InitialRequest struct {
 }
 
 // LDAP client challenge data.
-// Taken from "SAP HANA SQL Command Network Protocol Reference" version 1.1 chapter 3.9.2.2
+// Taken from "SAP HANA SQL Command Network Protocol Reference" version 1.2 chapter 3.9.2.2
 // The spec does not document the client challenge in detail.
 //
 // Wire format:

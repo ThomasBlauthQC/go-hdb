@@ -76,14 +76,16 @@ var (
 
 // subPrmsSize is the type used to encode and decode the size of sub parameters.
 // The hana protocoll supports whether:
-//   - a size <= 245 encoded in one byte or
+//   - a size <= 250 encoded in one byte or
 //   - an unsigned 2 byte integer size encoded in three bytes
 //     . first byte equals 255
 //     . second and third byte is an big endian encoded uint16
+//
+// See also "SAP HANA SQL Command Network Protocol Reference" version 1.2 chapter 2.3.7.20
 type subPrmsSize int
 
 const (
-	maxSubPrmsSize1ByteLen    = 245
+	maxSubPrmsSize1ByteLen    = 250
 	subPrmsSize2ByteIndicator = 255
 )
 

@@ -7,7 +7,7 @@ package ldap
 import "fmt"
 
 // Final LDAP authentication reply.
-// Taken from "SAP HANA SQL Command Network Protocol Reference" version 1.1 chapter 3.9.2.2
+// Taken from "SAP HANA SQL Command Network Protocol Reference" version 1.2 chapter 3.9.2.2
 //
 // Wire format:
 //	Field            Data Type        Description

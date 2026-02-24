@@ -12,7 +12,7 @@ import (
 )
 
 // Initial LDAP authentication reply.
-// Taken from "SAP HANA SQL Command Network Protocol Reference" version 1.1 chapter 3.9.2.2
+// Taken from "SAP HANA SQL Command Network Protocol Reference" version 1.2 chapter 3.9.2.2
 //
 // Wire format:
 //	Field            Data Type        Description
@@ -28,7 +28,7 @@ type InitialResponse struct {
 }
 
 // LDAP server challenge data.
-// Taken from "SAP HANA SQL Command Network Protocol Reference" version 1.1 chapter 3.9.2.2
+// Taken from "SAP HANA SQL Command Network Protocol Reference" version 1.2 chapter 3.9.2.2
 // The spec does not document the server challenge in detail.
 //
 // Wire format:
